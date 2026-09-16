@@ -1,0 +1,17 @@
+models:
+  mpnet_base:
+    model_name: "sentence-transformers/all-mpnet-base-v2"
+    max_seq_length: 512
+    pooling_mode: "mean"
+    embedding_dimension: 768
+    description: "MPNet base - strong general performance"
+
+  bge_base:
+    model_name: "BAAI/bge-base-en-v1.5"
+    max_seq_length: 512
+    pooling_mode: "cls"
+    embedding_dimension: 768
+    description: "BGE base v1.5 - optimized for retrieval"
+
+default_model: "mpnet_base"
+fine_tune_target: "mpnet_base"  # Select the model you want to fine-tune.
