@@ -5,11 +5,20 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
+
+# Avoid native thread/process conflicts between PyTorch, tokenizers, and FAISS.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = PROJECT_ROOT / "configs" / "model_config.yaml"
@@ -19,14 +28,16 @@ TOP_K = 100
 EVAL_K = 10
 
 
-def select_device() -> str:
-    """Select CUDA, Apple MPS, or CPU in that order."""
+def select_device(requested_device: str | None = None) -> str:
+    """Select a device, preferring stable CPU execution on macOS."""
+    if requested_device:
+        return requested_device
     try:
         import torch
 
         if torch.cuda.is_available():
             return "cuda"
-        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        if sys.platform != "darwin" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return "mps"
     except (ImportError, AttributeError):
         pass
@@ -185,6 +196,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=None, help="Model key from configs/model_config.yaml")
     parser.add_argument("--dataset", choices=("nfcorpus", "scifact"), help="Evaluate only one dataset")
+    parser.add_argument(
+        "--device",
+        choices=("cuda", "mps", "cpu"),
+        help="Execution device; macOS defaults to CPU to avoid native runtime conflicts",
+    )
     return parser.parse_args()
 
 
@@ -196,7 +212,15 @@ def main() -> int:
 
     model_names = [args.model] if args.model else list(models)
     dataset_names = [args.dataset] if args.dataset else ["nfcorpus", "scifact"]
-    device = select_device()
+    device = select_device(args.device)
+    if device == "cpu":
+        try:
+            import torch
+
+            torch.set_num_threads(1)
+            torch.set_num_interop_threads(1)
+        except (ImportError, RuntimeError):
+            pass
     print(f"Using device: {device}")
 
     results: dict[str, dict[str, dict[str, float]]] = {}
