@@ -29,18 +29,20 @@ EVAL_K = 10
 
 
 def select_device(requested_device: str | None = None) -> str:
-    """Select a device, preferring stable CPU execution on macOS."""
+    """Select the best available device (CUDA > MPS > CPU)."""
     if requested_device:
         return requested_device
+
     try:
         import torch
 
         if torch.cuda.is_available():
             return "cuda"
-        if sys.platform != "darwin" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        if sys.platform == "darwin" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return "mps"
     except (ImportError, AttributeError):
         pass
+
     return "cpu"
 
 

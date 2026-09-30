@@ -13,5 +13,5 @@ models:
     embedding_dimension: 768
     description: "BGE base v1.5 - optimized for retrieval"
 
-default_model: "mpnet_base"
-fine_tune_target: "mpnet_base"  # Select the model you want to fine-tune.
+default_model: "bge_base"
+fine_tune_target: "bge_base"  # Select the model you want to fine-tune.
