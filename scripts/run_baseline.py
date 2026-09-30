@@ -9,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
+from tqdm import tqdm
+import faiss
 
 # Avoid native thread/process conflicts between PyTorch, tokenizers, and FAISS.
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -28,29 +30,49 @@ TOP_K = 100
 EVAL_K = 10
 
 
+
+
 def select_device(requested_device: str | None = None) -> str:
     """Select the best available device (CUDA > MPS > CPU)."""
     if requested_device:
         return requested_device
-
+    
     try:
         import torch
-
+        
         if torch.cuda.is_available():
             return "cuda"
-        if sys.platform == "darwin" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps"
+        if sys.platform == "darwin" and hasattr(torch.backends, "mps"):
+            try:
+                if torch.backends.mps.is_available():
+                    return "mps"
+            except (AttributeError, RuntimeError):
+                pass  # MPS check failed, fall back to CPU
     except (ImportError, AttributeError):
         pass
-
+    
     return "cpu"
 
 
-def load_model_config() -> dict[str, dict[str, Any]]:
-    import yaml
+def require_dependency(module_name: str, *, install_hint: str) -> Any:
+    """Import a dependency or raise a user-friendly install hint."""
+    try:
+        return __import__(module_name)
+    except ImportError as exc:
+        raise ImportError(
+            f"Missing dependency '{module_name}'. Install it with: {install_hint}"
+        ) from exc
 
-    with CONFIG_PATH.open() as handle:
-        config = yaml.safe_load(handle)
+
+def load_model_config() -> dict[str, dict[str, Any]]:
+    yaml = require_dependency("yaml", install_hint="pip install pyyaml")
+    
+    try:
+        with CONFIG_PATH.open() as handle:
+            config = yaml.safe_load(handle)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse {CONFIG_PATH}: {e}") from e
+    
     models = config.get("models", {})
     if not models:
         raise ValueError(f"No models found in {CONFIG_PATH}")
@@ -108,6 +130,9 @@ def query_metrics(retrieved_ids: list[str], relevant_ids: set[str], k: int = EVA
         "mrr_at_10": reciprocal_rank,
     }
 
+    
+  
+
 
 def average_metrics(per_query: list[dict[str, float]]) -> dict[str, float]:
     if not per_query:
@@ -119,7 +144,7 @@ def average_metrics(per_query: list[dict[str, float]]) -> dict[str, float]:
 
 
 def encode(model: SentenceTransformer, texts: list[str], batch_size: int) -> np.ndarray:
-    import faiss
+    faiss = require_dependency("faiss", install_hint="pip install faiss-cpu")
 
     embeddings = model.encode(
         texts,
@@ -138,8 +163,8 @@ def evaluate_dataset(
     corpus_batch_size: int = 64,
     query_batch_size: int = 32,
 ) -> dict[str, float]:
-    import faiss
-    from tqdm import tqdm
+    faiss = require_dependency("faiss", install_hint="pip install faiss-cpu")
+  
 
     queries, corpus, relevance = load_processed_dataset(dataset_name)
     corpus_ids = list(corpus)
