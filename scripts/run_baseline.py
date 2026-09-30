@@ -94,6 +94,12 @@ def load_processed_dataset(dataset_name: str) -> tuple[dict[str, str], dict[str,
 
 
 def relevance_set(relevance: Any) -> set[str]:
+    """Convert graded relevance judgments to binary relevance.
+
+    Any document with a relevance score > 0 is considered relevant.
+    This intentionally discards relevance levels and is used for
+    binary metrics such as Recall@10, MAP@10, and MRR@10.
+    """
     if isinstance(relevance, dict):
         return {str(doc_id) for doc_id, score in relevance.items() if float(score) > 0}
     return {str(doc_id) for doc_id in relevance}
@@ -102,15 +108,34 @@ def relevance_set(relevance: Any) -> set[str]:
 def dcg(relevances: Iterable[int]) -> float:
     return sum(relevance / np.log2(rank + 2) for rank, relevance in enumerate(relevances))
 
+    
 
-def query_metrics(retrieved_ids: list[str], relevant_ids: set[str], k: int = EVAL_K) -> dict[str, float]:
+    
+def query_metrics(
+    retrieved_ids: list[str],
+    relevance: Any,  
+    k: int = EVAL_K,
+) -> dict[str, float]:
+    relevant_ids = relevance_set(relevance)  
     ranked = retrieved_ids[:k]
     hits = [int(doc_id in relevant_ids) for doc_id in ranked]
     relevant_count = len(relevant_ids)
 
-    ideal = [1] * min(relevant_count, k)
+    # NDCG uses original graded relevance scores
+    scores = relevance if isinstance(relevance, dict) else {
+        doc_id: 1 for doc_id in relevant_ids
+    }
+    # DCG: reward relevant documents, with higher ranks weighted more.
+    gains = [2 ** float(scores.get(doc_id, 0)) - 1 for doc_id in ranked]
+    # assume all relevant documents are ranked in the optimal order,
+    ideal = sorted(
+        (2 ** float(score) - 1 for score in scores.values()),
+        reverse=True,
+    )[:k]
     ideal_dcg = dcg(ideal)
-    ndcg = dcg(hits) / ideal_dcg if ideal_dcg else 0.0
+    ndcg = dcg(gains) / ideal_dcg if ideal_dcg else 0.0
+
+    
     recall = sum(hits) / relevant_count if relevant_count else 0.0
 
     average_precision = 0.0
@@ -128,10 +153,7 @@ def query_metrics(retrieved_ids: list[str], relevant_ids: set[str], k: int = EVA
         "recall_at_10": recall,
         "map_at_10": average_precision,
         "mrr_at_10": reciprocal_rank,
-    }
-
-    
-  
+    }  
 
 
 def average_metrics(per_query: list[dict[str, float]]) -> dict[str, float]:
@@ -184,7 +206,7 @@ def evaluate_dataset(
         zip(query_ids, indices), total=len(query_ids), desc=f"Metrics {dataset_name}"
     ):
         retrieved_ids = [corpus_ids[index] for index in retrieved_indices if index >= 0]
-        per_query.append(query_metrics(retrieved_ids, relevance_set(relevance[query_id])))
+        per_query.append(query_metrics(retrieved_ids, relevance[query_id]))
     return average_metrics(per_query)
 
 
